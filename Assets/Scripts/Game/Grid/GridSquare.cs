@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -27,12 +28,28 @@ public class GridSquare : MonoBehaviour
         return hooverImage.gameObject.activeSelf;
     }
 
+    public void PlaceShapeOnBoard()
+    {
+        ActivateSquare();
+    }
+
     public void ActivateSquare()
     {
         hooverImage.gameObject.SetActive(false);
         activeImage.gameObject.SetActive(true);
         Selected = true;
         SquareOccupied = true;
+    }
+
+    public void Deactivate()
+    {
+        activeImage.gameObject.SetActive(false);
+    }
+
+    public void ClearOccupied()
+    {
+        Selected = false;
+        SquareOccupied = false;
     }
 
     public void SetImage(bool setFirstImage)
@@ -42,17 +59,42 @@ public class GridSquare : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
-        hooverImage.gameObject.SetActive(true);
+        if (SquareOccupied == false)
+        {
+            Selected = true;
+            hooverImage.gameObject.SetActive(true);
+        }
+        else if (collision.GetComponent<ShapeSquare>() != null)
+        {
+            collision.GetComponent<ShapeSquare>().SetOccupied();
+        }
     }
 
     private void OnTriggerStay2D(Collider2D collision)
     {
-        hooverImage.gameObject.SetActive(true);
+        Selected = true;
+
+        if (SquareOccupied == false)
+        {
+            hooverImage.gameObject.SetActive(true);
+        }
+        else if (collision.GetComponent<ShapeSquare>() != null)
+        {
+            collision.GetComponent<ShapeSquare>().SetOccupied();
+        }
     }
 
     private void OnTriggerExit2D(Collider2D collision)
     {
-        hooverImage.gameObject.SetActive(false);
+        if (SquareOccupied == false)
+        {
+            Selected = false;
+            hooverImage.gameObject.SetActive(false);
+        }
+        else if (collision.GetComponent<ShapeSquare>() != null)
+        {
+            collision.GetComponent<ShapeSquare>().UnSetOccupied();
+        }
     }
 
     // Update is called once per frame
