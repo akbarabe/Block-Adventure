@@ -13,20 +13,27 @@ public class GridScript : MonoBehaviour
     public Vector2 startPosition = new Vector2(0.0f, 0.0f);
     public float squareScale = 0.5f;
     public float everySquareOffset = 0.0f;
+    public SquareTextureDat squareTextureDat;
 
     private Vector2 _offset = new Vector2(0.0f, 0.0f);
     private List<GameObject> _gridSquares = new List<GameObject>();
 
     private LineIndicator _lineIndicator;
+    private Config.SquareColor currentActiveSquareColor_ = Config.SquareColor.NotSet;
+    private List<Config.SquareColor> colorsInTheGrid_ = new List<Config.SquareColor>();
 
     private void OnEnable()
     {
         GameEvents.CheckIfShapeCanBePlaced += CheckIfShapeCanBePlaced;
+        GameEvents.UpdateSquareColor += OnUpdateSquareColor;
+        GameEvents.CheckIfPlayerLost += CheckIfPlayerLost;
     }
 
     private void OnDisable()
     {
         GameEvents.CheckIfShapeCanBePlaced -= CheckIfShapeCanBePlaced;
+        GameEvents.UpdateSquareColor -= OnUpdateSquareColor;
+        GameEvents.CheckIfPlayerLost -= CheckIfPlayerLost;
     }
 
     // Start is called before the first frame update
@@ -34,6 +41,32 @@ public class GridScript : MonoBehaviour
     {
         _lineIndicator = GetComponent<LineIndicator>();
         CreateGrid();
+        currentActiveSquareColor_ = squareTextureDat.activeSquareTextures[0].squarecolor;
+    }
+
+    private void OnUpdateSquareColor(Config.SquareColor color)
+    {
+        currentActiveSquareColor_ = color;
+    }
+
+    private List<Config.SquareColor> GetAllSquareColorsInTheGrid()
+    {
+        var colors = new List<Config.SquareColor>();
+
+        foreach (var square in _gridSquares)
+        {
+            var gridSquare = square.GetComponent<GridSquare>();
+            if (gridSquare.SquareOccupied)
+            {
+                var color = gridSquare.GetCurrentColor();
+                if (colors.Contains(color) == false)
+                {
+                    colors.Add(color);
+                }
+            }
+        }
+
+        return colors;
     }
 
     private void CreateGrid()
@@ -133,7 +166,7 @@ public class GridScript : MonoBehaviour
         {
             foreach (var squareIndex in squareIndexes)
             {
-                _gridSquares[squareIndex].GetComponent<GridSquare>().PlaceShapeOnBoard();
+                _gridSquares[squareIndex].GetComponent<GridSquare>().PlaceShapeOnBoard(currentActiveSquareColor_);
             }
 
             var shapeLeft = 0;
@@ -197,15 +230,50 @@ public class GridScript : MonoBehaviour
             lines.Add(data.ToArray());
         }
 
+        //This function should be called before CheckIfSquareAreCompleted
+        colorsInTheGrid_ = GetAllSquareColorsInTheGrid();
+
         var completedLines = CheckIfSquareAreCompleted(lines);
 
-        if (completedLines > 2)
+        if (completedLines >= 2)
         {
-
+            GameEvents.ShowCongratulations();
         }
 
         var totalScores = 10 * completedLines;
-        GameEvents.AddScores(totalScores);
+        var bonusScores = ShouldPlayColorBonusAnimation();
+        GameEvents.AddScores(totalScores + bonusScores);
+        GameEvents.CheckIfPlayerLost();
+    }
+
+    private int ShouldPlayColorBonusAnimation()
+    {
+        var colorsInTheGridAfterLineRemove = GetAllSquareColorsInTheGrid();
+        Config.SquareColor colorToPlayBonusFor = Config.SquareColor.NotSet;
+
+        foreach (var squareColor in colorsInTheGrid_)
+        {
+            if (colorsInTheGridAfterLineRemove.Contains(squareColor) == false)
+            {
+                colorToPlayBonusFor = squareColor;
+            }
+        }
+
+        if (colorToPlayBonusFor == Config.SquareColor.NotSet)
+        {
+            Debug.Log("Cannot find Color for Bonus");
+            return 0;
+        }
+
+        //Shound never play bonus for the current color
+        if (colorToPlayBonusFor == currentActiveSquareColor_)
+        {
+            return 0;
+        }
+
+        GameEvents.ShowBonusScreen(colorToPlayBonusFor);
+
+        return 50;
     }
 
     private int CheckIfSquareAreCompleted(List<int[]> data)
@@ -255,6 +323,118 @@ public class GridScript : MonoBehaviour
         }
 
         return linesCompleted;
+    }
+
+    private void CheckIfPlayerLost()
+    {
+        var validShapes = 0;
+        for (var index = 0; index < shapeStorage.shapeList.Count; index++)
+        {
+            var isShapeActive = shapeStorage.shapeList[index].IsAnyOfShapeSquareActive();
+            if (CheckIfShapeCanBePlacedOnGrid(shapeStorage.shapeList[index]) && isShapeActive)
+            {
+                shapeStorage.shapeList[index]?.ActivateShape();
+                validShapes++;
+            }
+        }
+
+        if (validShapes == 0)
+        {
+            //Game Over
+            GameEvents.GameOver(false);
+            // Debug.Log("Game Over!");
+        }
+    }
+
+    private bool CheckIfShapeCanBePlacedOnGrid(Shape currentShape)
+    {
+        var currentShapeData = currentShape.CurrentShapeData;
+        var shapeColumns = currentShapeData.columns;
+        var shapeRows = currentShapeData.rows;
+
+        //Contain all indexes of filled up squares
+        List<int> originalShapeFilledUpSquares = new List<int>();
+        var squareIndex = 0;
+
+        for (var rowIndex = 0; rowIndex < shapeRows; rowIndex++)
+        {
+            for (var columnIndex = 0; columnIndex < shapeColumns; columnIndex++)
+            {
+                if (currentShapeData.board[rowIndex].column[columnIndex])
+                {
+                    originalShapeFilledUpSquares.Add(squareIndex);
+                }
+
+                squareIndex++;
+            }
+        }
+
+        if (currentShape.TotalSquareNumber != originalShapeFilledUpSquares.Count)
+            Debug.LogError("Number of filled up squares are not the same as the original shape have");
+
+        var squareList = GetAllSquaresCombination(shapeColumns, shapeRows);
+
+        bool canBePlaced = false;
+
+        foreach (var number in squareList)
+        {
+            bool shapecanBePlacedOnTheBoard = true;
+            foreach (var squareIndexToCheck in originalShapeFilledUpSquares)
+            {
+                var comp = _gridSquares[number[squareIndexToCheck]].GetComponent<GridSquare>();
+                if (comp.SquareOccupied)
+                {
+                    shapecanBePlacedOnTheBoard = false;
+                }
+            }
+
+            if (shapecanBePlacedOnTheBoard)
+            {
+                canBePlaced = true;
+            }
+        }
+
+        return canBePlaced;
+    }
+
+    private List<int[]> GetAllSquaresCombination(int columns, int rows)
+    {
+        var squareList = new List<int[]>();
+        var lastColumnIndex = 0;
+        var lastRowIndex = 0;
+
+        int safeIndex = 0;
+
+        while (lastRowIndex + (rows - 1) < 9)
+        {
+            var rowData = new List<int>();
+
+            for (var row = lastRowIndex; row < lastRowIndex + rows; row++)
+            {
+                for (var column = lastColumnIndex; column < lastColumnIndex + columns; column++)
+                {
+                    rowData.Add(_lineIndicator.line_data[row, column]);
+                }
+            }
+
+            squareList.Add(rowData.ToArray());
+
+            lastColumnIndex++;
+
+            if (lastColumnIndex + (columns - 1) >= 9)
+            {
+                lastRowIndex++;
+                lastColumnIndex = 0;
+            }
+
+            safeIndex++;
+            if (safeIndex > 100)
+            {
+                break;
+            }
+        }
+
+        return squareList;
     }
 
     // Update is called once per frame
